@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wi-Fi通信量増加ツール（強化版）</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        #status {
+            margin-bottom: 20px;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        #progress {
+            font-size: 18px;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div id="status">接続を確認中...</div>
+    <div id="progress">データ処理: 0 MB</div>
+
+    <script>
+        // 接続タイプを確認する関数
+        function checkConnection() {
+            const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+            if (connection && connection.type !== 'wifi') {
+                document.getElementById('status').innerText = 'Wi-Fi接続ではありません。処理を停止します。';
+                return;
+            }
+            document.getElementById('status').innerText = 'Wi-Fi接続を確認（または仮定）。データ処理を開始します。';
+            startDataProcessing();
+        }
+
+        // 大量のダミーデータを生成し、処理する関数
+        function startDataProcessing() {
+            let processedMB = 0;
+            const progress = document.getElementById('progress');
+            const chunkSizeMB = 50; // 1チャンクあたり50MB（増量）
+            const workerCount = 4;  // 並列処理数（Web Workersの数）
+
+            // ダミーデータ生成関数
+            function generateDummyData(sizeMB) {
+                const sizeBytes = sizeMB * 1024 * 1024;
+                const data = new Uint8Array(sizeBytes);
+                for (let i = 0; i < sizeBytes; i++) {
+                    data[i] = Math.random() * 256;
+                }
+                return data;
+            }
+
+            // Web Worker用のスクリプト（インラインで定義）
+            const workerScript = `
+                self.onmessage = function(e) {
+                    const sizeMB = e.data.sizeMB;
+                    const sizeBytes = sizeMB * 1024 * 1024;
+                    const data = new Uint8Array(sizeBytes);
+                    for (let i = 0; i < sizeBytes; i++) {
+                        data[i] = Math.random() * 256;
+                    }
+                    const blob = new Blob([data], { type: 'application/octet-stream' });
+                    self.postMessage({ sizeMB: sizeMB });
+                };
+            `;
+            const workerBlob = new Blob([workerScript], { type: 'application/javascript' });
+            const workerURL = URL.createObjectURL(workerBlob);
+
+            // 複数ワーカーを起動
+            const workers = [];
+            for (let i = 0; i < workerCount; i++) {
+                const worker = new Worker(workerURL);
+                workers.push(worker);
+                worker.onmessage = (e) => {
+                    processedMB += e.data.sizeMB;
+                    progress.innerText = `データ処理: ${processedMB} MB`;
+                    // 次の処理を即座に開始
+                    worker.postMessage({ sizeMB: chunkSizeMB });
+                };
+                // 初回メッセージ送信
+                worker.postMessage({ sizeMB: chunkSizeMB });
+            }
+
+            // メインスレッドでも追加処理
+            function processInMainThread() {
+                const data = generateDummyData(chunkSizeMB);
+                const blob = new Blob([data], { type: 'application/octet-stream' });
+                const url = URL.createObjectURL(blob);
+                URL.revokeObjectURL(url); // メモリ解放
+                processedMB += chunkSizeMB;
+                progress.innerText = `データ処理: ${processedMB} MB`;
+                setTimeout(processInMainThread, 10); // 10ms間隔で高速処理
+            }
+            processInMainThread();
+        }
+
+        // ページ読み込み時に処理開始
+        window.onload = checkConnection;
+    </script>
+</body>
+</html>
